@@ -1,0 +1,6 @@
+__pycache__/
+*.pyc
+data/midi/
+data/processed.pkl
+checkpoints/
+.venv/
