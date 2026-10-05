@@ -26,16 +26,14 @@ def run_epoch(model, X, Y, loss_fn, opt, bs, dev):
         for i in range(0, len(X), bs):
             idx = perm[i:i + bs]
             x, y = X[idx].to(dev), Y[idx].to(dev)
-            n = (y != 0).sum().item()
-            if n == 0:
-                continue
             logits, _ = model(x)
             loss = loss_fn(logits.reshape(-1, logits.size(-1)), y.reshape(-1))
             if train:
                 opt.zero_grad(); loss.backward()
                 nn.utils.clip_grad_norm_(model.parameters(), 1.0); opt.step()
+            n = y.numel()
             tot_loss += loss.item() * n; tot_n += n
-            tot_hit += ((logits.argmax(-1) == y) & (y != 0)).sum().item()
+            tot_hit += (logits.argmax(-1) == y).sum().item()
     return tot_loss / tot_n, tot_hit / tot_n
 
 
@@ -59,7 +57,7 @@ def main():
 
     model = MusicLSTM(len(D["vocab"]), hidden=a.hidden).to(dev)
     opt = torch.optim.Adam(model.parameters(), lr=a.lr, betas=(0.9, 0.999))
-    lf = nn.CrossEntropyLoss(ignore_index=0)
+    lf = nn.CrossEntropyLoss()
     tr_hist, va_hist, best = [], [], 1e9
     for ep in range(1, a.epochs + 1):
         trl, tra = run_epoch(model, Xtr, Ytr, lf, opt, a.batch, dev)
