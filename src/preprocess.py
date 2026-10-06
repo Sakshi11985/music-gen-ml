@@ -1,211 +1,95 @@
-"""Parse MIDI files into normalized melody note-event tokens.
+"""Parse MIDI files into tokens and split into train/val/test.
 
-Pipeline:
-1. Detect the key.
-2. Transpose major pieces to C major and minor pieces to A minor.
-3. Chordify the score to obtain time-aligned events.
-4. Keep only the highest pitch from each event as the melody note.
-5. Quantize duration to 16th-note steps.
-6. Build a vocabulary from training data.
+Usage:  python src/preprocess.py --midi_dir data/midi --out data/processed.pkl
 
-Usage:
-    python src/preprocess.py --midi_dir data/midi --out data/processed.pkl
+Every piece is (1) transposed to C major / A minor, (2) 'chordified' so each new note event
+becomes one FULL token 'pitches_duration', e.g. '48.64.67_1.0'.
+From the full tokens we derive:
+  * MELODY tokens ('top-pitch_duration', e.g. '67_1.0')  -> used by the LSTM and bigram baseline
+  * FULL tokens (kept as *_full)                          -> used by the Naive Bayes-like model
 """
-
-import argparse
-import glob
-import os
-import pickle
+import argparse, glob, os, pickle
 from collections import Counter
-
-from music21 import converter, chord, interval, pitch
-from utils import make_token
-
-
-def normalize_key(score):
-    """Transpose major keys to C major and minor keys to A minor."""
-    try:
-        detected_key = score.analyze("key")
-
-        if detected_key.mode == "minor":
-            target = pitch.Pitch("A")
-        else:
-            target = pitch.Pitch("C")
-
-        transposition = interval.Interval(detected_key.tonic, target)
-        return score.transpose(transposition)
-
-    except Exception:
-        # If key detection fails, leave the score unchanged.
-        return score
+from music21 import converter, chord
+from utils import make_token, parse_token
 
 
-def midi_to_tokens(path):
-    """Convert one MIDI file into melody pitch-duration tokens."""
+def midi_to_tokens(path, normalize=True):
     score = converter.parse(path)
-
-    # Normalize the key before extracting melody.
-    score = normalize_key(score)
-
-    # Align simultaneous notes/chords.
-    chords = (
-        score.chordify()
-        .recurse()
-        .getElementsByClass(chord.Chord)
-    )
-
-    tokens = []
-
+    if normalize:                       # transpose so every piece is in C major / A minor
+        try:
+            k = score.analyze("key")
+            target = 0 if k.mode == "major" else 9
+            semis = (target - k.tonic.pitchClass) % 12
+            if semis > 6:
+                semis -= 12
+            score = score.transpose(semis)
+        except Exception:
+            pass
+    chords = score.chordify().recurse().getElementsByClass(chord.Chord)
+    toks = []
     for c in chords:
-        if not c.pitches:
-            continue
+        dur = round(float(c.quarterLength) * 2) / 2      # quantise to eighth notes
+        dur = min(max(dur, 0.5), 4.0)
+        toks.append(make_token([p.midi for p in c.pitches], dur))
+    return toks
 
-        # Use the highest pitch as the melody note.
-        melody_pitch = max(c.pitches, key=lambda p: p.midi)
 
-        # Quantize duration to 16th-note units.
-        dur = round(float(c.quarterLength) * 4) / 4
-
-        # Keep durations in a reasonable range.
-        dur = min(max(dur, 0.25), 4.0)
-
-        tokens.append(
-            make_token([melody_pitch.midi], dur)
-        )
-
-    return tokens
+def to_melody(tok):
+    pitches, dur = parse_token(tok)
+    return f"{pitches[-1]}_{dur}"        # highest pitch = melody line
 
 
 def main():
     ap = argparse.ArgumentParser()
+    ap.add_argument("--midi_dir", default="data/midi")
+    ap.add_argument("--out", default="data/processed.pkl")
+    ap.add_argument("--min_freq", type=int, default=2, help="rarer melody tokens become <unk>")
+    ap.add_argument("--max_files", type=int, default=0, help="0 = all files")
+    a = ap.parse_args()
 
-    ap.add_argument(
-        "--midi_dir",
-        default="data/midi"
-    )
-
-    ap.add_argument(
-        "--out",
-        default="data/processed.pkl"
-    )
-
-    ap.add_argument(
-        "--min_freq",
-        type=int,
-        default=2,
-        help="Tokens occurring fewer than this become <unk>"
-    )
-
-    ap.add_argument(
-        "--max_files",
-        type=int,
-        default=0,
-        help="0 = use all files"
-    )
-
-    args = ap.parse_args()
-
-    files = sorted(
-        glob.glob(
-            os.path.join(
-                args.midi_dir,
-                "**",
-                "*.mid*"
-            ),
-            recursive=True
-        )
-    )
-
-    if args.max_files:
-        files = files[:args.max_files]
-
-    assert files, f"No MIDI files found in {args.midi_dir}"
-
+    files = sorted(glob.glob(os.path.join(a.midi_dir, "**", "*.mid*"), recursive=True))
+    if a.max_files:
+        files = files[: a.max_files]
+    assert files, f"No MIDI files found in {a.midi_dir}"
     print(f"Parsing {len(files)} files ...")
 
-    songs = {}
-
-    for i, filepath in enumerate(files, 1):
+    full = {}
+    for i, f in enumerate(files, 1):
         try:
-            tokens = midi_to_tokens(filepath)
-
-            if len(tokens) > 20:
-                songs[os.path.basename(filepath)] = tokens
-
+            t = midi_to_tokens(f)
+            t = [x for x in t if parse_token(x)[0]]          # drop empty events
+            if len(t) > 20:
+                full[os.path.basename(f)] = t
         except Exception as e:
-            print("  skipped", filepath, "->", e)
-
+            print("  skipped", f, "->", e)
         if i % 10 == 0:
             print(f"  {i}/{len(files)}")
 
-    # Split each song chronologically:
-    # 80% train, 10% validation, 10% test.
-    train = {}
-    val = {}
-    test = {}
+    # split every song by position 80/10/10 (works even with very few songs)
+    sp = {"train": {}, "val": {}, "test": {}}
+    for name, t in full.items():
+        n = len(t)
+        sp["train"][name], sp["val"][name], sp["test"][name] = t[: int(.8 * n)], t[int(.8 * n): int(.9 * n)], t[int(.9 * n):]
 
-    for name, tokens in songs.items():
-        n = len(tokens)
+    out = {}
+    for s, songs in sp.items():
+        out[s + "_full"] = songs
+        out[s] = {k: [to_melody(x) for x in v] for k, v in songs.items()}
 
-        train_end = int(0.8 * n)
-        val_end = int(0.9 * n)
+    cnt = Counter(tok for t in out["train"].values() for tok in t)
+    vocab = ["<unk>"] + sorted(tok for tok, c in cnt.items() if c >= a.min_freq)
+    out["vocab"] = vocab
+    out["tok2id"] = {t: i for i, t in enumerate(vocab)}
 
-        train[name] = tokens[:train_end]
-        val[name] = tokens[train_end:val_end]
-        test[name] = tokens[val_end:]
+    n_notes = sum(len(t) for t in full.values())
+    test_toks = [x for t in out["test"].values() for x in t]
+    unk = sum(x not in out["tok2id"] for x in test_toks) / max(len(test_toks), 1)
+    print(f"{len(full)} songs, {n_notes} note events, melody vocab size {len(vocab)}, test <unk> rate {unk:.3f}")
 
-    # Build vocabulary ONLY from training data.
-    counts = Counter(
-        token
-        for tokens in train.values()
-        for token in tokens
-    )
-
-    vocab = ["<unk>"] + sorted(
-        token
-        for token, count in counts.items()
-        if count >= args.min_freq
-    )
-
-    tok2id = {
-        token: idx
-        for idx, token in enumerate(vocab)
-    }
-
-    n_events = sum(
-        len(tokens)
-        for tokens in songs.values()
-    )
-
-    print(
-        f"{len(songs)} songs, "
-        f"{n_events} melody events, "
-        f"vocab size {len(vocab)}"
-    )
-
-    print("Most common tokens:")
-
-    for token, count in counts.most_common(10):
-        print(f"  {token}: {count}")
-
-    os.makedirs(
-        os.path.dirname(args.out) or ".",
-        exist_ok=True
-    )
-
-    with open(args.out, "wb") as f:
-        pickle.dump(
-            dict(
-                train=train,
-                val=val,
-                test=test,
-                vocab=vocab,
-                tok2id=tok2id
-            ),
-            f
-        )
-
-    print("Saved", args.out)
+    with open(a.out, "wb") as f:
+        pickle.dump(out, f)
+    print("Saved", a.out)
 
 
 if __name__ == "__main__":

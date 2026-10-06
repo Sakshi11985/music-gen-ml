@@ -21,7 +21,7 @@ if st.button("Generate"):
         m, vocab = load_model()
         toks = generate(m, vocab, guide[:16], length, temp)
     else:
-        toks = NaiveBayesLike().fit(D["train"]).generate(guide[:length])
+        toks = NaiveBayesLike().fit(D["train_full"]).generate(D["test_full"][song][:length])
     path = "outputs/demo.mid"
     tokens_to_midi(toks, path)
     b64 = base64.b64encode(open(path, "rb").read()).decode()
