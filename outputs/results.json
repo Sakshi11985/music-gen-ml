@@ -1,0 +1,29 @@
+{
+  "n_targets": 3806,
+  "rows": [
+    {
+      "model": "Unigram (no context)",
+      "perplexity": 49.93,
+      "accuracy": 6.5,
+      "note": ""
+    },
+    {
+      "model": "Bigram Markov",
+      "perplexity": 16.28,
+      "accuracy": 33.0,
+      "note": ""
+    },
+    {
+      "model": "Vanilla NN (MLP)",
+      "perplexity": 15.98,
+      "accuracy": 31.8,
+      "note": "sees previous 32 notes"
+    },
+    {
+      "model": "LSTM (256 units)",
+      "perplexity": 12.63,
+      "accuracy": 35.3,
+      "note": ""
+    }
+  ]
+}

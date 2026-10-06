@@ -1,5 +1,5 @@
 """Live demo.  Run:  streamlit run app.py"""
-import io, os, sys, pickle, random, tempfile, wave
+import io, json, os, sys, pickle, random, tempfile, wave
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "src"))
 
 import numpy as np
@@ -18,17 +18,19 @@ SEED_LEN, SR = 16, 22050
 BG, SEED_C, GEN_C, REAL_C = "#0e1117", "#6b7280", "#a78bfa", "#34d399"
 MODEL_INFO = {
     "LSTM": "Neural network with memory. Our main model.",
+    "Vanilla NN (MLP)": "Neural network that sees the previous 32 notes at once, no memory.",
     "Bigram Markov": "Looks only at the previous note. Simple baseline.",
     "Naive Bayes-like": "Picks a melody note from the bass note only.",
 }
-# Numbers from our last evaluation run (edit here if you re-run the experiments)
-RESULTS = [
-    ("LSTM (256 units)", "12.98", "35.7%", "2.99"),
-    ("Bigram Markov", "16.28", "33.0%", "2.39"),
-    ("Naive Bayes-like", "n/a", "13.1% *", "9.07"),
-    ("Random notes", "n/a", "n/a", "16.02"),
-    ("Real music (reference)", "n/a", "n/a", "2.90"),
-]
+
+
+def read_json(path):
+    try:
+        with open(path) as f:
+            return json.load(f)
+    except Exception:
+        return None
+
 
 st.markdown("""
 <style>
@@ -55,6 +57,12 @@ def load_data():
 def load_lstm():
     from generate import load_model
     return load_model()
+
+
+@st.cache_resource(show_spinner="Loading the vanilla network...")
+def load_mlp_model():
+    from mlp import load_mlp
+    return load_mlp()
 
 
 @st.cache_resource
@@ -102,6 +110,11 @@ def make_tokens(model, song, length, temp):
         m, vocab = load_lstm()
         seed = melody[:SEED_LEN]
         return generate(m, vocab, seed, length, temp), len(seed)
+    if model == "Vanilla NN (MLP)":
+        from mlp import generate_mlp
+        m, vocab = load_mlp_model()
+        seed = melody[:SEED_LEN]
+        return generate_mlp(m, vocab, seed, length, temp), len(seed)
     if model == "Bigram Markov":
         seed = melody[:SEED_LEN]
         return get_bigram().generate(seed, length), len(seed)
@@ -202,8 +215,8 @@ with st.sidebar:
     model = st.radio("Model", list(MODEL_INFO), captions=list(MODEL_INFO.values()))
     song = labels[st.selectbox("Starting piece", list(labels), help="The LSTM and bigram start from its first 16 notes; Naive Bayes follows its bass line.")]
     length = st.slider("Length (note events)", 30, 300, 100)
-    temp = st.slider("Creativity (temperature)", 0.3, 1.5, 1.0, 0.1, disabled=model != "LSTM",
-                     help="Low = safe and repetitive. High = adventurous and messier. LSTM only.")
+    temp = st.slider("Creativity (temperature)", 0.3, 1.5, 1.0, 0.1, disabled=model not in ("LSTM", "Vanilla NN (MLP)"),
+                     help="Low = safe and repetitive. High = adventurous and messier. Neural networks only.")
     bpm = st.slider("Tempo (BPM)", 60, 180, 100, 10)
     seed_val = st.number_input("Random seed (0 = different every time)", 0, 99999, 0)
     st.caption("Tip: use the same seed to get the same piece again.")
@@ -224,6 +237,8 @@ with tab1:
             st.error(f"Could not generate with {model}: {e}")
             if model == "LSTM":
                 st.info("Train the model first:  `python src\\train.py --epochs 20`")
+            if model == "Vanilla NN (MLP)":
+                st.info("Train the model first:  `python src\\mlp.py --epochs 30`")
     if "last" in st.session_state:
         toks, seed_n, m_used, bpm_used = st.session_state["last"]
         st.subheader(f"Result - {m_used}")
@@ -249,7 +264,7 @@ with tab2:
     if "cmp" in st.session_state:
         out, bpm_used = st.session_state["cmp"]
         names = list(out)
-        for row in (names[:2], names[2:]):
+        for row in [names[i:i + 2] for i in range(0, len(names), 2)]:
             cols = st.columns(2)
             for col, name in zip(cols, row):
                 with col:
@@ -261,16 +276,31 @@ with tab2:
 
 # ----------------------------------------------------------------- tab 3
 with tab3:
-    st.subheader("How good are the models?")
-    st.dataframe({"Model": [r[0] for r in RESULTS], "Test perplexity (lower is better)": [r[1] for r in RESULTS],
-                  "Next-note accuracy": [r[2] for r in RESULTS], "Avg note jump (real = 2.9)": [r[3] for r in RESULTS]},
-                 hide_index=True)
-    st.caption("* Naive Bayes predicts the melody note from the bass note, which is a different task, so its accuracy is not directly comparable. "
-               "Results are from a single run on a small dataset (64 pieces).")
-    if os.path.exists("outputs/lstm_loss.png"):
-        st.subheader("LSTM training curve")
-        st.image("outputs/lstm_loss.png")
-        st.caption("Training loss keeps falling while validation loss rises after about epoch 7 (overfitting). We keep the best checkpoint.")
+    st.subheader("1. How well do the models predict the next note?")
+    res = read_json("outputs/results.json")
+    if res:
+        st.dataframe({"Model": [r["model"] for r in res["rows"]],
+                      "Test perplexity (lower is better)": [r["perplexity"] for r in res["rows"]],
+                      "Next-note accuracy (%)": [r["accuracy"] for r in res["rows"]]}, hide_index=True)
+        st.caption(f"Every model is scored on the same {res['n_targets']} held-out notes. Single run on a small dataset (64 pieces).")
+    else:
+        st.info("Run `python src\\compare_models.py` to fill this table.")
+
+    st.subheader("2. Does the generated music behave like real music?")
+    gm = read_json("outputs/generation_metrics.json")
+    if gm:
+        st.dataframe({"Source": list(gm), "Avg note jump (semitones)": [v["jump"] for v in gm.values()],
+                      "Pitch-class distance (lower = closer)": [v["pc"] for v in gm.values()],
+                      "Distinct 4-note patterns": [v["d4"] for v in gm.values()]}, hide_index=True)
+        st.caption("Real music jumps about 2-3 semitones between notes. Random notes jump about 16.")
+    else:
+        st.info("Run `python src\\evaluate.py` to fill this table.")
+
+    for path, cap in [("outputs/lstm_loss.png", "LSTM training curve"), ("outputs/mlp_loss.png", "Vanilla NN training curve")]:
+        if os.path.exists(path):
+            st.subheader(cap)
+            st.image(path)
+    st.caption("Validation loss rises after a few epochs (overfitting), so the best checkpoint is kept.")
 
 # ----------------------------------------------------------------- tab 4
 with tab4:
@@ -283,10 +313,11 @@ Every piece is moved to the same key (C major / A minor). Each note event become
 
 **Models**
 1. **LSTM** - a neural network with memory of earlier notes (1 layer, 256 units).
-2. **Bigram Markov** - predicts the next note from the current note only (baseline).
-3. **Naive Bayes-like** - picks a melody note from the bass note alone, as in the Stanford paper.
+2. **Vanilla NN (MLP)** - a plain neural network that sees the previous 32 notes at once (1024 hidden units, as in the Stanford paper).
+3. **Bigram Markov** - predicts the next note from the current note only (baseline).
+4. **Naive Bayes-like** - picks a melody note from the bass note alone, as in the Stanford paper.
 
 **Creativity (temperature).** The model gives a probability for every possible next note. Low temperature picks the likeliest ones (safe, repetitive); high temperature takes more risks.
 
-**Limitations.** Small dataset, not piano-only, the LSTM overfits, one training run, no listening survey.
+**Limitations.** Small dataset, not piano-only, the LSTM overfits, one training run, no listening survey. The encoder-decoder model from the paper is not implemented.
 """)
