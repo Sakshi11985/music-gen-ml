@@ -3,11 +3,11 @@
 1) Naive Bayes-like:  P(melody note | bass note)     (from the Stanford paper: P(note | chord))
 2) Bigram Markov:     P(next melody token | current melody token)  <- fair baseline for the LSTM
 
-Usage:  python src/baseline_nb.py --data data/processed.pkl
+Usage:  python src/baseline_nb.py
 """
-import argparse, math, pickle, random
+import argparse, math, os, pickle, random
 from collections import Counter, defaultdict
-from utils import parse_token, make_token, tokens_to_midi
+from utils import parse_token, make_token, tokens_to_midi, path
 
 
 class NaiveBayesLike:
@@ -98,11 +98,14 @@ class Bigram:
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--data", default="data/processed.pkl")
-    ap.add_argument("--out", default="outputs/nb_sample.mid")
+    ap.add_argument("--data", default=path("data", "processed.pkl"))
+    ap.add_argument("--out", default=path("outputs", "nb_sample.mid"))
+    ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--length", type=int, default=200)
     a = ap.parse_args()
-    D = pickle.load(open(a.data, "rb"))
+    random.seed(a.seed)
+    with open(a.data, "rb") as f:
+        D = pickle.load(f)
 
     nb = NaiveBayesLike().fit(D["train_full"])
     print(f"Naive Bayes-like  P(melody | bass)   top-1 accuracy  train {nb.accuracy(D['train_full']):.3f}  test {nb.accuracy(D['test_full']):.3f}")
@@ -113,8 +116,9 @@ def main():
     loss, ppl, acc = bg.evaluate(D["test"])
     print(f"Bigram Markov     P(next | current)  test loss {loss:.4f}  perplexity {ppl:.2f}  next-note accuracy {acc:.3f}")
     seed = next(iter(D["test"].values()))[:1]
-    tokens_to_midi(bg.generate(seed, a.length), a.out.replace("nb_", "bigram_"))
-    print("Wrote", a.out, "and", a.out.replace("nb_", "bigram_"))
+    bigram_out = os.path.join(os.path.dirname(a.out), "bigram_sample.mid")
+    tokens_to_midi(bg.generate(seed, a.length), bigram_out)
+    print("Wrote", a.out, "and", bigram_out)
 
 
 if __name__ == "__main__":

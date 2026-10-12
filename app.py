@@ -10,7 +10,7 @@ import matplotlib.pyplot as plt
 from matplotlib.patches import Rectangle
 
 from baseline_nb import NaiveBayesLike, Bigram
-from utils import parse_token, tokens_to_midi
+from utils import parse_token, tokens_to_midi, path
 
 st.set_page_config(page_title="AI Music Generator", page_icon="🎵", layout="wide")
 
@@ -49,7 +49,7 @@ st.markdown("""
 # ----------------------------------------------------------------- data / models
 @st.cache_resource(show_spinner="Loading data...")
 def load_data():
-    with open("data/processed.pkl", "rb") as f:
+    with open(path("data", "processed.pkl"), "rb") as f:
         return pickle.load(f)
 
 
@@ -80,10 +80,10 @@ try:
     D = load_data()
     assert "train_full" in D
 except FileNotFoundError:
-    st.error("`data/processed.pkl` not found. Run:  `python src\\preprocess.py --midi_dir data\\midi --out data\\processed.pkl`")
+    st.error("`data/processed.pkl` not found. Run `python export_corpus.py` and then `python src/preprocess.py` first.")
     st.stop()
 except AssertionError:
-    st.error("`data/processed.pkl` is from an older version. Re-run `python src\\preprocess.py --midi_dir data\\midi --out data\\processed.pkl`")
+    st.error("`data/processed.pkl` is from an older version. Re-run `python src/preprocess.py`.")
     st.stop()
 
 
@@ -119,6 +119,19 @@ def make_tokens(model, song, length, temp):
         seed = melody[:SEED_LEN]
         return get_bigram().generate(seed, length), len(seed)
     return get_nb().generate(piece(song, "_full")[:length]), 0
+
+
+def fix_hint(model, err):
+    """Tell the user what actually went wrong instead of always saying 'train first'."""
+    if isinstance(err, ModuleNotFoundError):
+        return "A package is missing. Run `pip install -r requirements.txt`."
+    if isinstance(err, FileNotFoundError):
+        if model == "Vanilla NN (MLP)":
+            return "No trained checkpoint. Run `python src/mlp.py --epochs 30`."
+        return "No trained checkpoint. Run `python src/train.py --epochs 30` (and `python src/mlp.py` for the MLP)."
+    if isinstance(err, RuntimeError) and "size mismatch" in str(err):
+        return "The checkpoint was trained on a different vocabulary. Retrain after re-running preprocess.py."
+    return "See the terminal for the full error."
 
 
 def set_seed(value):
@@ -235,10 +248,7 @@ with tab1:
             st.session_state["last"] = (toks, seed_n, model, bpm)
         except Exception as e:
             st.error(f"Could not generate with {model}: {e}")
-            if model == "LSTM":
-                st.info("Train the model first:  `python src\\train.py --epochs 20`")
-            if model == "Vanilla NN (MLP)":
-                st.info("Train the model first:  `python src\\mlp.py --epochs 30`")
+            st.info(fix_hint(model, e))
     if "last" in st.session_state:
         toks, seed_n, m_used, bpm_used = st.session_state["last"]
         st.subheader(f"Result - {m_used}")
@@ -261,6 +271,7 @@ with tab2:
             st.session_state["cmp"] = (out, bpm)
         except Exception as e:
             st.error(f"Comparison failed: {e}")
+            st.info(fix_hint("", e))
     if "cmp" in st.session_state:
         out, bpm_used = st.session_state["cmp"]
         names = list(out)
@@ -277,29 +288,29 @@ with tab2:
 # ----------------------------------------------------------------- tab 3
 with tab3:
     st.subheader("1. How well do the models predict the next note?")
-    res = read_json("outputs/results.json")
+    res = read_json(path("outputs", "results.json"))
     if res:
         st.dataframe({"Model": [r["model"] for r in res["rows"]],
                       "Test perplexity (lower is better)": [r["perplexity"] for r in res["rows"]],
                       "Next-note accuracy (%)": [r["accuracy"] for r in res["rows"]]}, hide_index=True)
-        st.caption(f"Every model is scored on the same {res['n_targets']} held-out notes. Single run on a small dataset (64 pieces).")
+        st.caption(f"Every model is scored on the same {res['n_targets']} held-out notes. Single run on a small dataset ({len(D['train'])} pieces).")
     else:
-        st.info("Run `python src\\compare_models.py` to fill this table.")
+        st.info("Run `python src/compare_models.py` to fill this table.")
 
     st.subheader("2. Does the generated music behave like real music?")
-    gm = read_json("outputs/generation_metrics.json")
+    gm = read_json(path("outputs", "generation_metrics.json"))
     if gm:
         st.dataframe({"Source": list(gm), "Avg note jump (semitones)": [v["jump"] for v in gm.values()],
                       "Pitch-class distance (lower = closer)": [v["pc"] for v in gm.values()],
                       "Distinct 4-note patterns": [v["d4"] for v in gm.values()]}, hide_index=True)
         st.caption("Real music jumps about 2-3 semitones between notes. Random notes jump about 16.")
     else:
-        st.info("Run `python src\\evaluate.py` to fill this table.")
+        st.info("Run `python src/evaluate.py` to fill this table.")
 
-    for path, cap in [("outputs/lstm_loss.png", "LSTM training curve"), ("outputs/mlp_loss.png", "Vanilla NN training curve")]:
-        if os.path.exists(path):
+    for img, cap in [(path("outputs", "lstm_loss.png"), "LSTM training curve"), (path("outputs", "mlp_loss.png"), "Vanilla NN training curve")]:
+        if os.path.exists(img):
             st.subheader(cap)
-            st.image(path)
+            st.image(img)
     st.caption("Validation loss rises after a few epochs (overfitting), so the best checkpoint is kept.")
 
 # ----------------------------------------------------------------- tab 4

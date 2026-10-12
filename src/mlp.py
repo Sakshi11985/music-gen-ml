@@ -3,10 +3,10 @@ It sees the previous `context` notes at once (no recurrent memory) and predicts 
 
 Usage:  python src/mlp.py --epochs 30
 """
-import argparse, math, pickle, torch, torch.nn as nn
+import argparse, math, pickle, random, torch, torch.nn as nn
 import matplotlib; matplotlib.use("Agg")
 import matplotlib.pyplot as plt
-from utils import tokens_to_midi
+from utils import tokens_to_midi, path, ensure_parent
 
 
 class MusicMLP(nn.Module):
@@ -56,8 +56,8 @@ def run_epoch(model, X, Y, loss_fn, opt, bs, dev):
     return tot_loss / tot_n, tot_hit / tot_n
 
 
-def load_mlp(ckpt="checkpoints/mlp.pt", dev="cpu"):
-    ck = torch.load(ckpt, map_location=dev)
+def load_mlp(ckpt=path("checkpoints", "mlp.pt"), dev="cpu"):
+    ck = torch.load(ckpt, map_location=dev, weights_only=True)
     m = MusicMLP(len(ck["vocab"]), ck["context"], ck["emb"], ck["hidden"]).to(dev)
     m.load_state_dict(ck["model"]); m.eval()
     return m, ck["vocab"]
@@ -80,7 +80,7 @@ def generate_mlp(model, vocab, seed_tokens, length=100, temperature=1.0, dev="cp
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--data", default="data/processed.pkl")
+    ap.add_argument("--data", default=path("data", "processed.pkl"))
     ap.add_argument("--epochs", type=int, default=30)
     ap.add_argument("--context", type=int, default=32, help="how many previous notes the network sees")
     ap.add_argument("--emb", type=int, default=32)
@@ -88,11 +88,14 @@ def main():
     ap.add_argument("--dropout", type=float, default=0.0)
     ap.add_argument("--lr", type=float, default=0.001)
     ap.add_argument("--batch", type=int, default=128)
-    ap.add_argument("--ckpt", default="checkpoints/mlp.pt")
+    ap.add_argument("--seed", type=int, default=0)
+    ap.add_argument("--ckpt", default=path("checkpoints", "mlp.pt"))
     a = ap.parse_args()
 
+    random.seed(a.seed); torch.manual_seed(a.seed)
     dev = "cuda" if torch.cuda.is_available() else "cpu"
-    D = pickle.load(open(a.data, "rb"))
+    with open(a.data, "rb") as f:
+        D = pickle.load(f)
     Xtr, Ytr = make_samples(D["train"], D["tok2id"], a.context)
     Xva, Yva = make_samples(D["val"], D["tok2id"], a.context)
     Xte, Yte = make_samples(D["test"], D["tok2id"], a.context)
@@ -101,7 +104,8 @@ def main():
     model = MusicMLP(len(D["vocab"]), a.context, a.emb, a.hidden, a.dropout).to(dev)
     opt = torch.optim.Adam(model.parameters(), lr=a.lr)
     lf = nn.CrossEntropyLoss(ignore_index=0)
-    tr_hist, va_hist, best = [], [], 1e9
+    tr_hist, va_hist, best = [], [], float("inf")
+    ensure_parent(a.ckpt)
     for ep in range(1, a.epochs + 1):
         trl, tra = run_epoch(model, Xtr, Ytr, lf, opt, a.batch, dev)
         val, vaa = run_epoch(model, Xva, Yva, lf, None, a.batch, dev)
@@ -117,10 +121,10 @@ def main():
     print(f"\nTEST  loss {tel:.4f}  perplexity {math.exp(tel):.2f}  next-note accuracy {tea:.3f}")
 
     plt.plot(tr_hist, label="train"); plt.plot(va_hist, label="val")
-    plt.xlabel("epoch"); plt.ylabel("cross-entropy"); plt.legend(); plt.title("Vanilla NN (MLP) loss")
-    plt.savefig("outputs/mlp_loss.png", dpi=150, bbox_inches="tight")
+    plt.xlabel("epoch"); plt.ylabel("cross-entropy (nats)"); plt.legend(); plt.title("Vanilla NN (MLP) loss")
+    plt.savefig(ensure_parent(path("outputs", "mlp_loss.png")), dpi=150, bbox_inches="tight")
     seed = next(iter(D["test"].values()))[:16]
-    tokens_to_midi(generate_mlp(model, vocab, seed, 200, 1.0), "outputs/mlp_sample.mid")
+    tokens_to_midi(generate_mlp(model, vocab, seed, 200, 1.0), path("outputs", "mlp_sample.mid"))
     print("Saved outputs/mlp_loss.png and outputs/mlp_sample.mid")
 
 

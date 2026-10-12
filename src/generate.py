@@ -2,13 +2,13 @@
 
 Usage:  python src/generate.py --length 200 --temperature 1.0 --out outputs/lstm_sample.mid
 """
-import argparse, pickle, torch
+import argparse, pickle, random, torch
 from model import MusicLSTM
-from utils import tokens_to_midi
+from utils import tokens_to_midi, path
 
 
-def load_model(ckpt="checkpoints/lstm.pt", dev="cpu"):
-    ck = torch.load(ckpt, map_location=dev)
+def load_model(ckpt=path("checkpoints", "lstm.pt"), dev="cpu"):
+    ck = torch.load(ckpt, map_location=dev, weights_only=True)
     m = MusicLSTM(len(ck["vocab"]), hidden=ck["hidden"]).to(dev)
     m.load_state_dict(ck["model"]); m.eval()
     return m, ck["vocab"]
@@ -32,15 +32,19 @@ def generate(model, vocab, seed_tokens, length=200, temperature=1.0, dev="cpu"):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--ckpt", default="checkpoints/lstm.pt")
-    ap.add_argument("--data", default="data/processed.pkl")
+    ap.add_argument("--ckpt", default=path("checkpoints", "lstm.pt"))
+    ap.add_argument("--data", default=path("data", "processed.pkl"))
     ap.add_argument("--length", type=int, default=200)
     ap.add_argument("--seed_len", type=int, default=16)
     ap.add_argument("--temperature", type=float, default=1.0)
-    ap.add_argument("--out", default="outputs/lstm_sample.mid")
+    ap.add_argument("--seed", type=int, default=None, help="set for a reproducible sample")
+    ap.add_argument("--out", default=path("outputs", "lstm_sample.mid"))
     a = ap.parse_args()
+    if a.seed is not None:
+        random.seed(a.seed); torch.manual_seed(a.seed)
     model, vocab = load_model(a.ckpt)
-    D = pickle.load(open(a.data, "rb"))
+    with open(a.data, "rb") as f:
+        D = pickle.load(f)
     seed = next(iter(D["test"].values()))[: a.seed_len]
     tokens_to_midi(generate(model, vocab, seed, a.length, a.temperature), a.out)
     print("Wrote", a.out)

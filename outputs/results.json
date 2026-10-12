@@ -21,8 +21,8 @@
     },
     {
       "model": "LSTM (256 units)",
-      "perplexity": 12.63,
-      "accuracy": 35.3,
+      "perplexity": 12.97,
+      "accuracy": 33.6,
       "note": ""
     }
   ]

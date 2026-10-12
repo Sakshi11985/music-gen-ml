@@ -1,5 +1,5 @@
 music21>=9.1
-torch>=2.0
-numpy
-matplotlib
-streamlit
+torch>=2.1
+numpy>=1.24
+matplotlib>=3.7
+streamlit>=1.30

@@ -5,12 +5,14 @@ tokens before it. Targets that are <unk> are ignored for all models.
 
 Usage:  python src/compare_models.py        (writes outputs/results.json)
 """
-import json, math, os, pickle
+import json, math, pickle
 from collections import Counter
 import torch, torch.nn.functional as F
 from baseline_nb import Bigram
+from utils import path, ensure_parent
 
-D = pickle.load(open("data/processed.pkl", "rb"))
+with open(path("data", "processed.pkl"), "rb") as f:
+    D = pickle.load(f)
 tok2id, vocab = D["tok2id"], D["vocab"]
 V = len(vocab)
 test_ids = [[tok2id.get(t, 0) for t in toks] for toks in D["test"].values()]
@@ -61,21 +63,11 @@ except Exception as e:
 # 4) LSTM (reads each whole excerpt from its start)
 try:
     from generate import load_model
+    from train import evaluate_excerpts
     lstm, _ = load_model()
-    nll = hits = 0
-    with torch.no_grad():
-        for ids in test_ids:
-            if len(ids) < 2:
-                continue
-            lg, _ = lstm(torch.tensor([ids[:-1]]))
-            y = torch.tensor(ids[1:])
-            m = y != 0
-            if m.sum() == 0:
-                continue
-            lg = lg[0]
-            nll += F.cross_entropy(lg[m], y[m], reduction="sum").item()
-            hits += (lg.argmax(-1)[m] == y[m]).sum().item()
-    add("LSTM (256 units)", nll, hits)
+    loss, acc, n = evaluate_excerpts(lstm, D["test"], tok2id)
+    assert n == n_targets, (n, n_targets)
+    add(f"LSTM ({lstm.lstm.hidden_size} units)", loss * n, acc * n)
 except Exception as e:
     print("(LSTM skipped:", e, ")")
 
@@ -83,6 +75,7 @@ print(f"\nAll models scored on the same {n_targets} test targets ({len(test_ids)
 print(f"{'Model':24s} {'perplexity':>11s} {'accuracy %':>11s}")
 for r in rows:
     print(f"{r['model']:24s} {r['perplexity']:11.2f} {r['accuracy']:11.1f}   {r['note']}")
-os.makedirs("outputs", exist_ok=True)
-json.dump({"n_targets": n_targets, "rows": rows}, open("outputs/results.json", "w"), indent=2)
-print("\nSaved outputs/results.json")
+out = ensure_parent(path("outputs", "results.json"))
+with open(out, "w") as f:
+    json.dump({"n_targets": n_targets, "rows": rows}, f, indent=2)
+print("\nSaved", out)

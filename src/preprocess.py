@@ -11,7 +11,7 @@ From the full tokens we derive:
 import argparse, glob, os, pickle
 from collections import Counter
 from music21 import converter, chord
-from utils import make_token, parse_token
+from utils import make_token, parse_token, path, ensure_parent
 
 
 def midi_to_tokens(path, normalize=True):
@@ -42,8 +42,8 @@ def to_melody(tok):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--midi_dir", default="data/midi")
-    ap.add_argument("--out", default="data/processed.pkl")
+    ap.add_argument("--midi_dir", default=path("data", "midi"))
+    ap.add_argument("--out", default=path("data", "processed.pkl"))
     ap.add_argument("--min_freq", type=int, default=2, help="rarer melody tokens become <unk>")
     ap.add_argument("--max_files", type=int, default=0, help="0 = all files")
     a = ap.parse_args()
@@ -51,7 +51,8 @@ def main():
     files = sorted(glob.glob(os.path.join(a.midi_dir, "**", "*.mid*"), recursive=True))
     if a.max_files:
         files = files[: a.max_files]
-    assert files, f"No MIDI files found in {a.midi_dir}"
+    if not files:
+        raise SystemExit(f"No MIDI files found in {a.midi_dir}. Run  python export_corpus.py  first.")
     print(f"Parsing {len(files)} files ...")
 
     full = {}
@@ -87,7 +88,7 @@ def main():
     unk = sum(x not in out["tok2id"] for x in test_toks) / max(len(test_toks), 1)
     print(f"{len(full)} songs, {n_notes} note events, melody vocab size {len(vocab)}, test <unk> rate {unk:.3f}")
 
-    with open(a.out, "wb") as f:
+    with open(ensure_parent(a.out), "wb") as f:
         pickle.dump(out, f)
     print("Saved", a.out)
 

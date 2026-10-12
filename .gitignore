@@ -1,6 +1,11 @@
 __pycache__/
 *.pyc
-data/midi/
-data/processed.pkl
-checkpoints/
 .venv/
+.DS_Store
+
+# Data is rebuilt with export_corpus.py + preprocess.py
+data/
+
+# The trained checkpoints in checkpoints/ ARE committed (about 7 MB) so the demo runs
+# without training. Uncomment the next line if you would rather not commit them.
+# checkpoints/

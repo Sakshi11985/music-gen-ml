@@ -1,7 +1,21 @@
-"""Shared helpers: token <-> pitches/duration, MIDI writing."""
+"""Shared helpers: project paths, token <-> pitches/duration, MIDI writing."""
+import os
 from music21 import stream, chord, note, tempo
 
-SPLIT_PITCH = 60  # MIDI 60 = middle C. Below = "left hand", at/above = "right hand"
+# Repo root, so scripts work no matter which folder you run them from.
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+
+def path(*parts):
+    """Absolute path inside the repo, e.g. path('data', 'processed.pkl')."""
+    return os.path.join(ROOT, *parts)
+
+
+def ensure_parent(file_path):
+    """Create the folder a file will be written into (data/, outputs/, checkpoints/)."""
+    d = os.path.dirname(os.path.abspath(file_path))
+    os.makedirs(d, exist_ok=True)
+    return file_path
 
 
 def make_token(pitches, dur):
@@ -17,7 +31,7 @@ def parse_token(tok):
     return pitches, float(d)
 
 
-def tokens_to_midi(tokens, path, bpm=100):
+def tokens_to_midi(tokens, out_path, bpm=100):
     s = stream.Stream()
     s.append(tempo.MetronomeMark(number=bpm))
     for tok in tokens:
@@ -28,15 +42,5 @@ def tokens_to_midi(tokens, path, bpm=100):
             s.append(note.Note(pitches[0], quarterLength=dur))
         else:
             s.append(chord.Chord(list(pitches), quarterLength=dur))
-    s.write("midi", fp=path)
-    return path
-
-
-def pitch_histogram(tokens):
-    """Normalised histogram over 128 MIDI pitches."""
-    import numpy as np
-    h = np.zeros(128)
-    for t in tokens:
-        for p in parse_token(t)[0]:
-            h[p] += 1
-    return h / max(h.sum(), 1)
+    s.write("midi", fp=ensure_parent(out_path))
+    return out_path
