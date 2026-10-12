@@ -156,5 +156,5 @@ M. Kang, J. Kim, E. Ringdahl, *Music Composition with Machine Learning*, Stanfor
 
 ## Team
 
-- `<Name, SRN>` - `<contribution>`
-- `<Name, SRN>` - `<contribution>`
+- `<SAKSHI P SHETTY, SRN>` - `PES1UG24AM395`
+- `<NamE, SRN>` - `<contribution>`
