@@ -1,7 +1,7 @@
 # Music Generation with Machine Learning
 
 UE24CS352A Machine Learning mini-project. Based on the Stanford CS229 (2018) project
-*Music Composition with Machine Learning* (Kang, Kim, Ringdahl).
+*Generating Music with Machine Learning* (Kang, Kim, Ringdahl).
 
 The models read a melody note by note and predict the next note. Repeating that prediction
 composes a new melody. We compare one neural sequence model (LSTM) with a plain neural
@@ -152,9 +152,15 @@ outputs/                results JSON, loss plots, sample MIDI files
 
 ## Reference
 
-M. Kang, J. Kim, E. Ringdahl, *Music Composition with Machine Learning*, Stanford CS229 project, 2018.
+M. Kang, J. Kim, E. Ringdahl, *Generating Music with Machine Learning*, Stanford CS229 project, 2018.
+[Report](https://cs229.stanford.edu/proj2018/report/18.pdf)
 
 ## Team
 
-- `<SAKSHI P SHETTY, SRN>` - `PES1UG24AM395`
-- `<NamE, SRN>` - `<contribution>`
+| Name | SRN |
+|---|---|
+| Sakshi P Shetty | PES1UG24AM395 |
+| Vallabha Anand Bhilare | PES1UG24AM414 |
+
+Section G, team G-25. Allotted problem statement 22: *Generating music with Machine Learning*
+([report](https://cs229.stanford.edu/proj2018/report/18.pdf), [poster](https://cs229.stanford.edu/proj2018/poster/18.pdf)).
